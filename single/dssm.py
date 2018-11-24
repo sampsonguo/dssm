@@ -1,36 +1,67 @@
+#  一个序列化的库
 import pickle
 import random
 import time
 import sys
 import numpy as np
 import tensorflow as tf
+from numpy import array
+from scipy.sparse import coo_matrix
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 
+# model_log_dir
 flags.DEFINE_string('summaries_dir', '/tmp/dssm-400-120-relu', 'Summaries directory')
+
+# Learning_rate
 flags.DEFINE_float('learning_rate', 0.1, 'Initial learning rate.')
+
+# Max_steps
 flags.DEFINE_integer('max_steps', 900000, 'Number of steps to run trainer.')
+
+# Epoch Steps???
 flags.DEFINE_integer('epoch_steps', 18000, "Number of steps in one epoch.")
+
+# pickle???
 flags.DEFINE_integer('pack_size', 2000, "Number of batches in one pickle pack.")
+
+# GPU or Not
 flags.DEFINE_bool('gpu', 1, "Enable GPU or not")
 
+# Timestamp
 start = time.time()
 
+# Train Data: Doc & Query
 doc_train_data = None
 query_train_data = None
 
+# Row, Col, Data -> 
+row  = array([0,0,1,3,1,0,0])
+col  = array([0,2,1,3,1,0,0])
+data = array([1,1,1,1,1,1,1])
+doc_train_data = coo_matrix((data,(row,col)), shape=(4,4)).tocsr()
+query_train_data = doc_train_data
+
+query_test_data = query_train_data
+doc_test_data = doc_train_data
+
 # load test data for now
-query_test_data = pickle.load(open('../data/query.test.1.pickle', 'rb')).tocsr()
-doc_test_data = pickle.load(open('../data/doc.test.1.pickle', 'rb')).tocsr()
+#query_test_data = pickle.load(open('../data/query.test.1.pickle', 'rb')).tocsr()
+#doc_test_data = pickle.load(open('../data/doc.test.1.pickle', 'rb')).tocsr()
 
 def load_train_data(pack_idx):
     global doc_train_data, query_train_data
-    doc_train_data = None
-    query_train_data = None
+    #doc_train_data = None
+    #query_train_data = None
     start = time.time()
-    doc_train_data = pickle.load(open('../data/doc.train.' + str(pack_idx)+ '.pickle', 'rb')).tocsr()
-    query_train_data = pickle.load(open('../data/query.train.'+ str(pack_idx)+ '.pickle', 'rb')).tocsr()
+    #doc_train_data = pickle.load(open('../data/doc.train.' + str(pack_idx)+ '.pickle', 'rb')).tocsr()
+    #query_train_data = pickle.load(open('../data/query.train.'+ str(pack_idx)+ '.pickle', 'rb')).tocsr()
+    #row  = array([0,0,1,3,1,0,0])
+    #col  = array([0,2,1,3,1,0,0])
+    #col  = array([0,2,1,3,1,0,0])
+    #doc_train_data = coo_matrix( (data,(row,col)), shape=(4,4)).tocsr()
+    #query_train_data = doc_train_data
     end = time.time()
     print ("\nTrain data %d/9 is loaded in %.2fs" % (pack_idx, end - start))
 
@@ -53,14 +84,13 @@ def variable_summaries(var, name):
     """Attach a lot of summaries to a Tensor."""
     with tf.name_scope('summaries'):
         mean = tf.reduce_mean(var)
-        tf.scalar_summary('mean/' + name, mean)
+        tf.summary.scalar('mean/' + name, mean)
         with tf.name_scope('stddev'):
             stddev = tf.sqrt(tf.reduce_sum(tf.square(var - mean)))
-        tf.scalar_summary('sttdev/' + name, stddev)
-        tf.scalar_summary('max/' + name, tf.reduce_max(var))
-        tf.scalar_summary('min/' + name, tf.reduce_min(var))
-        tf.histogram_summary(name, var)
-
+        tf.summary.scalar('sttdev/' + name, stddev)
+        tf.summary.scalar('max/' + name, tf.reduce_max(var))
+        tf.summary.scalar('min/' + name, tf.reduce_min(var))
+        tf.summary.histogram(name, var)
 
 with tf.name_scope('input'):
     # Shape [BS, TRIGRAM_D].
@@ -123,7 +153,7 @@ with tf.name_scope('Loss'):
     prob = tf.nn.softmax((cos_sim))
     hit_prob = tf.slice(prob, [0, 0], [-1, 1])
     loss = -tf.reduce_sum(tf.log(hit_prob)) / BS
-    tf.scalar_summary('loss', loss)
+    tf.summary.scalar('loss', loss)
 
 with tf.name_scope('Training'):
     # Optimizer
@@ -132,13 +162,13 @@ with tf.name_scope('Training'):
 # with tf.name_scope('Accuracy'):
 #     correct_prediction = tf.equal(tf.argmax(prob, 1), 0)
 #     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-#     tf.scalar_summary('accuracy', accuracy)
+#     tf.summary.scalar('accuracy', accuracy)
 
 merged = tf.merge_all_summaries()
 
 with tf.name_scope('Test'):
     average_loss = tf.placeholder(tf.float32)
-    loss_summary = tf.scalar_summary('average_loss', average_loss)
+    loss_summary = tf.summary.scalar('average_loss', average_loss)
 
 
 def pull_batch(query_data, doc_data, batch_idx):
