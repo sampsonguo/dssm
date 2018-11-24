@@ -23,7 +23,7 @@ flags.DEFINE_integer('max_steps', 900000, 'Number of steps to run trainer.')
 flags.DEFINE_integer('epoch_steps', 18000, "Number of steps in one epoch.")
 
 # pickle???
-flags.DEFINE_integer('pack_size', 2000, "Number of batches in one pickle pack.")
+flags.DEFINE_integer('pack_size', 2, "Number of batches in one pickle pack.")
 
 # GPU or Not
 flags.DEFINE_bool('gpu', 1, "Enable GPU or not")
@@ -36,15 +36,19 @@ doc_train_data = None
 query_train_data = None
 
 # Row, Col, Data -> doc_train_data
-row  = array([0,0,1,3,1,0,0])
-col  = array([0,2,1,3,1,0,0])
+row  = array([0,0,1,1,1,0,0])
+col  = array([0,1,1,1,1,0,0])
 data = array([1,1,1,1,1,1,1])
-doc_train_data = coo_matrix((data,(row,col)), shape=(4,49284)).tocsr()
+doc_train_data = coo_matrix((data,(row,col)), shape=(2,49284)).tocsr()
+print(doc_train_data.shape)
+print(type(doc_train_data))
 query_train_data = doc_train_data
 
 # doc_data same as query_data
 query_test_data = query_train_data
 doc_test_data = doc_train_data
+
+print(doc_train_data)
 
 # Load data?
 def load_train_data(pack_idx):
@@ -61,7 +65,7 @@ TRIGRAM_D = 49284
 
 # Neg
 NEG = 50
-BS = 1000
+BS = 2
 
 L1_N = 400
 L2_N = 120
@@ -69,6 +73,8 @@ L2_N = 120
 # Input Shape
 query_in_shape = np.array([BS, TRIGRAM_D], np.int64)
 doc_in_shape = np.array([BS, TRIGRAM_D], np.int64)
+
+print("query in shape is %s" % query_in_shape.shape)
 
 # Summaries for tf board for multi variables
 def variable_summaries(var, name):
@@ -206,6 +212,9 @@ def feed_dict(Train, batch_idx):
         query_in, doc_in = pull_batch(query_train_data, doc_train_data, batch_idx)
     else:
         query_in, doc_in = pull_batch(query_test_data, doc_test_data, batch_idx)
+    print("=====")
+    print(query_in)
+    print(doc_in)
     return {query_batch: query_in, doc_batch: doc_in}
 
 
@@ -229,12 +238,15 @@ with tf.Session(config=config) as sess:
             load_train_data(batch_idx / FLAGS.pack_size + 1)
 
         # Print the Progress
-        if batch_idx % (FLAGS.pack_size / 64) == 0:
-            progress = 100.0 * batch_idx / FLAGS.epoch_steps
-            sys.stdout.write("\r%.2f%% Epoch" % progress)
-            sys.stdout.flush()
+        #if batch_idx % (FLAGS.pack_size / 64) == 0:
+        #    progress = 100.0 * batch_idx / FLAGS.epoch_steps
+        #    sys.stdout.write("\r%.2f%% Epoch" % progress)
+        #    sys.stdout.flush()
 
         # Run
+        print("here 2 -----")
+        print("batch idx is %s" % batch_idx)
+        print("pack size is %d" % FLAGS.pack_size)
         sess.run(train_step, feed_dict=feed_dict(True, batch_idx % FLAGS.pack_size))
 
         # Batch Size
