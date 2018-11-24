@@ -1,4 +1,3 @@
-#  一个序列化的库
 import pickle
 import random
 import time
@@ -36,50 +35,42 @@ start = time.time()
 doc_train_data = None
 query_train_data = None
 
-# Row, Col, Data -> 
+# Row, Col, Data -> doc_train_data
 row  = array([0,0,1,3,1,0,0])
 col  = array([0,2,1,3,1,0,0])
 data = array([1,1,1,1,1,1,1])
-doc_train_data = coo_matrix((data,(row,col)), shape=(4,4)).tocsr()
+doc_train_data = coo_matrix((data,(row,col)), shape=(4,49284)).tocsr()
 query_train_data = doc_train_data
 
+# doc_data same as query_data
 query_test_data = query_train_data
 doc_test_data = doc_train_data
 
-# load test data for now
-#query_test_data = pickle.load(open('../data/query.test.1.pickle', 'rb')).tocsr()
-#doc_test_data = pickle.load(open('../data/doc.test.1.pickle', 'rb')).tocsr()
-
+# Load data?
 def load_train_data(pack_idx):
     global doc_train_data, query_train_data
-    #doc_train_data = None
-    #query_train_data = None
     start = time.time()
-    #doc_train_data = pickle.load(open('../data/doc.train.' + str(pack_idx)+ '.pickle', 'rb')).tocsr()
-    #query_train_data = pickle.load(open('../data/query.train.'+ str(pack_idx)+ '.pickle', 'rb')).tocsr()
-    #row  = array([0,0,1,3,1,0,0])
-    #col  = array([0,2,1,3,1,0,0])
-    #col  = array([0,2,1,3,1,0,0])
-    #doc_train_data = coo_matrix( (data,(row,col)), shape=(4,4)).tocsr()
-    #query_train_data = doc_train_data
     end = time.time()
     print ("\nTrain data %d/9 is loaded in %.2fs" % (pack_idx, end - start))
 
 end = time.time()
 print("Loading data from HDD to memory: %.2fs" % (end - start))
 
+# Trigram
 TRIGRAM_D = 49284
 
+# Neg
 NEG = 50
 BS = 1000
 
 L1_N = 400
 L2_N = 120
 
+# Input Shape
 query_in_shape = np.array([BS, TRIGRAM_D], np.int64)
 doc_in_shape = np.array([BS, TRIGRAM_D], np.int64)
 
-
+# Summaries for tf board for multi variables
 def variable_summaries(var, name):
     """Attach a lot of summaries to a Tensor."""
     with tf.name_scope('summaries'):
@@ -92,62 +83,81 @@ def variable_summaries(var, name):
         tf.summary.scalar('min/' + name, tf.reduce_min(var))
         tf.summary.histogram(name, var)
 
+# Input Format
 with tf.name_scope('input'):
     # Shape [BS, TRIGRAM_D].
     query_batch = tf.sparse_placeholder(tf.float32, shape=query_in_shape, name='QueryBatch')
     # Shape [BS, TRIGRAM_D]
     doc_batch = tf.sparse_placeholder(tf.float32, shape=doc_in_shape, name='DocBatch')
 
+# L1 Layer
 with tf.name_scope('L1'):
+    # Norm
     l1_par_range = np.sqrt(6.0 / (TRIGRAM_D + L1_N))
+    # Random Init weights1
     weight1 = tf.Variable(tf.random_uniform([TRIGRAM_D, L1_N], -l1_par_range, l1_par_range))
+    # Random Init Bias1
     bias1 = tf.Variable(tf.random_uniform([L1_N], -l1_par_range, l1_par_range))
     variable_summaries(weight1, 'L1_weights')
     variable_summaries(bias1, 'L1_biases')
 
+    # Query_Batch * Weight + Bias
     # query_l1 = tf.matmul(tf.to_float(query_batch),weight1)+bias1
     query_l1 = tf.sparse_tensor_dense_matmul(query_batch, weight1) + bias1
+
+    # Doc_Batch * Weight + Bias, Same Weight
     # doc_l1 = tf.matmul(tf.to_float(doc_batch),weight1)+bias1
     doc_l1 = tf.sparse_tensor_dense_matmul(doc_batch, weight1) + bias1
 
+    # Relu Activation
     query_l1_out = tf.nn.relu(query_l1)
     doc_l1_out = tf.nn.relu(doc_l1)
 
+# L2 Layer
 with tf.name_scope('L2'):
+   
+    # Weight Init, xavier_initializer
     l2_par_range = np.sqrt(6.0 / (L1_N + L2_N))
 
+
+    # Xavier Initializer
     weight2 = tf.Variable(tf.random_uniform([L1_N, L2_N], -l2_par_range, l2_par_range))
     bias2 = tf.Variable(tf.random_uniform([L2_N], -l2_par_range, l2_par_range))
     variable_summaries(weight2, 'L2_weights')
     variable_summaries(bias2, 'L2_biases')
 
+    # Qeury * Weight
     query_l2 = tf.matmul(query_l1_out, weight2) + bias2
     doc_l2 = tf.matmul(doc_l1_out, weight2) + bias2
     query_y = tf.nn.relu(query_l2)
     doc_y = tf.nn.relu(doc_l2)
 
+# FD rotate
 with tf.name_scope('FD_rotate'):
     # Rotate FD+ to produce 50 FD-
     temp = tf.tile(doc_y, [1, 1])
 
+    # ?
     for i in range(NEG):
         rand = int((random.random() + i) * BS / NEG)
-        doc_y = tf.concat(0,
-                          [doc_y,
+        doc_y = tf.concat([doc_y,
                            tf.slice(temp, [rand, 0], [BS - rand, -1]),
-                           tf.slice(temp, [0, 0], [rand, -1])])
+                           tf.slice(temp, [0, 0], [rand, -1])], 0)
 
+# Cosine Sim
 with tf.name_scope('Cosine_Similarity'):
     # Cosine similarity
     query_norm = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(query_y), 1, True)), [NEG + 1, 1])
     doc_norm = tf.sqrt(tf.reduce_sum(tf.square(doc_y), 1, True))
 
-    prod = tf.reduce_sum(tf.mul(tf.tile(query_y, [NEG + 1, 1]), doc_y), 1, True)
-    norm_prod = tf.mul(query_norm, doc_norm)
+    prod = tf.reduce_sum(tf.multiply(tf.tile(query_y, [NEG + 1, 1]), doc_y), 1, True)
+    norm_prod = tf.multiply(query_norm, doc_norm)
 
+    # x/y elementwise
     cos_sim_raw = tf.truediv(prod, norm_prod)
     cos_sim = tf.transpose(tf.reshape(tf.transpose(cos_sim_raw), [NEG + 1, BS])) * 20
 
+# Loss Calulation
 with tf.name_scope('Loss'):
     # Train Loss
     prob = tf.nn.softmax((cos_sim))
@@ -159,18 +169,14 @@ with tf.name_scope('Training'):
     # Optimizer
     train_step = tf.train.GradientDescentOptimizer(FLAGS.learning_rate).minimize(loss)
 
-# with tf.name_scope('Accuracy'):
-#     correct_prediction = tf.equal(tf.argmax(prob, 1), 0)
-#     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-#     tf.summary.scalar('accuracy', accuracy)
+merged = tf.summary.merge_all()
 
-merged = tf.merge_all_summaries()
-
+# Test Data
 with tf.name_scope('Test'):
     average_loss = tf.placeholder(tf.float32)
     loss_summary = tf.summary.scalar('average_loss', average_loss)
 
-
+# Batch Data
 def pull_batch(query_data, doc_data, batch_idx):
     # start = time.time()
     query_in = query_data[batch_idx * BS:(batch_idx + 1) * BS, :]
@@ -178,12 +184,11 @@ def pull_batch(query_data, doc_data, batch_idx):
     query_in = query_in.tocoo()
     doc_in = doc_in.tocoo()
 
-
-
     query_in = tf.SparseTensorValue(
         np.transpose([np.array(query_in.row, dtype=np.int64), np.array(query_in.col, dtype=np.int64)]),
         np.array(query_in.data, dtype=np.float),
         np.array(query_in.shape, dtype=np.int64))
+
     doc_in = tf.SparseTensorValue(
         np.transpose([np.array(doc_in.row, dtype=np.int64), np.array(doc_in.col, dtype=np.int64)]),
         np.array(doc_in.data, dtype=np.float),
@@ -206,49 +211,33 @@ def feed_dict(Train, batch_idx):
 
 config = tf.ConfigProto()  # log_device_placement=True)
 config.gpu_options.allow_growth = True
-#if not FLAGS.gpu:
-#config = tf.ConfigProto(device_count= {'GPU' : 0})
 
+# Entrance
 with tf.Session(config=config) as sess:
-    sess.run(tf.initialize_all_variables())
-    train_writer = tf.train.SummaryWriter(FLAGS.summaries_dir + '/train', sess.graph)
-    test_writer = tf.train.SummaryWriter(FLAGS.summaries_dir + '/test', sess.graph)
+
+    print("Here 1 -------------------")
+    sess.run(tf.global_variables_initializer())
+    train_writer = tf.summary.FileWriter(FLAGS.summaries_dir + '/train', sess.graph)
+    test_writer = tf.summary.FileWriter(FLAGS.summaries_dir + '/test', sess.graph)
 
     # Actual execution
     start = time.time()
-    # fp_time = 0
-    # fbp_time = 0
+    
     for step in range(FLAGS.max_steps):
         batch_idx = step % FLAGS.epoch_steps
         if batch_idx % FLAGS.pack_size == 0:
             load_train_data(batch_idx / FLAGS.pack_size + 1)
 
-            # # setup toolbar
-            # sys.stdout.write("[%s]" % (" " * toolbar_width))
-            # #sys.stdout.flush()
-            # sys.stdout.write("\b" * (toolbar_width + 1))  # return to start of line, after '['
-
-
+        # Print the Progress
         if batch_idx % (FLAGS.pack_size / 64) == 0:
             progress = 100.0 * batch_idx / FLAGS.epoch_steps
             sys.stdout.write("\r%.2f%% Epoch" % progress)
             sys.stdout.flush()
 
-        # t1 = time.time()
-        # sess.run(loss, feed_dict = feed_dict(True, batch_idx))
-        # t2 = time.time()
-        # fp_time += t2 - t1
-        # #print(t2-t1)
-        # t1 = time.time()
+        # Run
         sess.run(train_step, feed_dict=feed_dict(True, batch_idx % FLAGS.pack_size))
-        # t2 = time.time()
-        # fbp_time += t2 - t1
-        # #print(t2 - t1)
-        # if batch_idx % 2000 == 1999:
-        #     print ("MiniBatch: Average FP Time %f, Average FP+BP Time %f" %
-        #        (fp_time / step, fbp_time / step))
 
-
+        # Batch Size
         if batch_idx == FLAGS.epoch_steps - 1:
             end = time.time()
             epoch_loss = 0
@@ -260,9 +249,6 @@ with tf.Session(config=config) as sess:
             train_loss = sess.run(loss_summary, feed_dict={average_loss: epoch_loss})
             train_writer.add_summary(train_loss, step + 1)
 
-            # print ("MiniBatch: Average FP Time %f, Average FP+BP Time %f" %
-            #        (fp_time / step, fbp_time / step))
-            #
             print ("\nEpoch #%-5d | Train Loss: %-4.3f | PureTrainTime: %-3.3fs" %
                     (step / FLAGS.epoch_steps, epoch_loss, end - start))
 
