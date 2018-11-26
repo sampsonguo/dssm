@@ -11,16 +11,16 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 
 # model_log_dir
-flags.DEFINE_string('summaries_dir', '/tmp/dssm-400-120-relu', 'Summaries directory')
+flags.DEFINE_string('summaries_dir', '../model', 'Summaries directory')
 
 # Learning_rate
 flags.DEFINE_float('learning_rate', 0.1, 'Initial learning rate.')
 
 # Max_steps
-flags.DEFINE_integer('max_steps', 900000, 'Number of steps to run trainer.')
+flags.DEFINE_integer('max_steps', 18, 'Number of steps to run trainer.')
 
 # Epoch Steps???
-flags.DEFINE_integer('epoch_steps', 18000, "Number of steps in one epoch.")
+flags.DEFINE_integer('epoch_steps', 18, "Number of steps in one epoch.")
 
 # pickle???
 flags.DEFINE_integer('pack_size', 2, "Number of batches in one pickle pack.")
@@ -39,16 +39,14 @@ query_train_data = None
 row  = array([0,0,1,1,1,0,0])
 col  = array([0,1,1,1,1,0,0])
 data = array([1,1,1,1,1,1,1])
-doc_train_data = coo_matrix((data,(row,col)), shape=(2,49284)).tocsr()
-print(doc_train_data.shape)
-print(type(doc_train_data))
+
+doc_train_data = coo_matrix((data,(row,col)), shape=(4,49284)).tocsr()
+
 query_train_data = doc_train_data
 
 # doc_data same as query_data
 query_test_data = query_train_data
 doc_test_data = doc_train_data
-
-print(doc_train_data)
 
 # Load data?
 def load_train_data(pack_idx):
@@ -60,7 +58,7 @@ def load_train_data(pack_idx):
 end = time.time()
 print("Loading data from HDD to memory: %.2fs" % (end - start))
 
-# Trigram
+# Trigram, Doc
 TRIGRAM_D = 49284
 
 # Neg
@@ -73,8 +71,6 @@ L2_N = 120
 # Input Shape
 query_in_shape = np.array([BS, TRIGRAM_D], np.int64)
 doc_in_shape = np.array([BS, TRIGRAM_D], np.int64)
-
-print("query in shape is %s" % query_in_shape.shape)
 
 # Summaries for tf board for multi variables
 def variable_summaries(var, name):
@@ -143,7 +139,7 @@ with tf.name_scope('FD_rotate'):
     # Rotate FD+ to produce 50 FD-
     temp = tf.tile(doc_y, [1, 1])
 
-    # ?
+    # Random Generate Neg samples
     for i in range(NEG):
         rand = int((random.random() + i) * BS / NEG)
         doc_y = tf.concat([doc_y,
@@ -165,9 +161,10 @@ with tf.name_scope('Cosine_Similarity'):
 
 # Loss Calulation
 with tf.name_scope('Loss'):
-    # Train Loss
+    # Train Loss, Get The First as Lable
     prob = tf.nn.softmax((cos_sim))
     hit_prob = tf.slice(prob, [0, 0], [-1, 1])
+    # loss function
     loss = -tf.reduce_sum(tf.log(hit_prob)) / BS
     tf.summary.scalar('loss', loss)
 
@@ -183,6 +180,7 @@ with tf.name_scope('Test'):
     loss_summary = tf.summary.scalar('average_loss', average_loss)
 
 # Batch Data
+# 
 def pull_batch(query_data, doc_data, batch_idx):
     # start = time.time()
     query_in = query_data[batch_idx * BS:(batch_idx + 1) * BS, :]
@@ -212,9 +210,6 @@ def feed_dict(Train, batch_idx):
         query_in, doc_in = pull_batch(query_train_data, doc_train_data, batch_idx)
     else:
         query_in, doc_in = pull_batch(query_test_data, doc_test_data, batch_idx)
-    print("=====")
-    print(query_in)
-    print(doc_in)
     return {query_batch: query_in, doc_batch: doc_in}
 
 
@@ -224,7 +219,6 @@ config.gpu_options.allow_growth = True
 # Entrance
 with tf.Session(config=config) as sess:
 
-    print("Here 1 -------------------")
     sess.run(tf.global_variables_initializer())
     train_writer = tf.summary.FileWriter(FLAGS.summaries_dir + '/train', sess.graph)
     test_writer = tf.summary.FileWriter(FLAGS.summaries_dir + '/test', sess.graph)
@@ -244,11 +238,8 @@ with tf.Session(config=config) as sess:
         #    sys.stdout.flush()
 
         # Run
-        print("here 2 -----")
-        print("batch idx is %s" % batch_idx)
-        print("pack size is %d" % FLAGS.pack_size)
         sess.run(train_step, feed_dict=feed_dict(True, batch_idx % FLAGS.pack_size))
-
+        
         # Batch Size
         if batch_idx == FLAGS.epoch_steps - 1:
             end = time.time()
