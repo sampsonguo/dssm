@@ -121,7 +121,6 @@ with tf.name_scope('L2'):
     # Weight Init, xavier_initializer
     l2_par_range = np.sqrt(6.0 / (L1_N + L2_N))
 
-
     # Xavier Initializer
     weight2 = tf.Variable(tf.random_uniform([L1_N, L2_N], -l2_par_range, l2_par_range))
     bias2 = tf.Variable(tf.random_uniform([L2_N], -l2_par_range, l2_par_range))
@@ -133,6 +132,8 @@ with tf.name_scope('L2'):
     doc_l2 = tf.matmul(doc_l1_out, weight2) + bias2
     query_y = tf.nn.relu(query_l2)
     doc_y = tf.nn.relu(doc_l2)
+
+    tf.summary.scalar('query_y', query_y)
 
 # FD rotate
 with tf.name_scope('FD_rotate'):
@@ -180,7 +181,6 @@ with tf.name_scope('Test'):
     loss_summary = tf.summary.scalar('average_loss', average_loss)
 
 # Batch Data
-# 
 def pull_batch(query_data, doc_data, batch_idx):
     # start = time.time()
     query_in = query_data[batch_idx * BS:(batch_idx + 1) * BS, :]
@@ -239,6 +239,7 @@ with tf.Session(config=config) as sess:
 
         # Run
         sess.run(train_step, feed_dict=feed_dict(True, batch_idx % FLAGS.pack_size))
+
         
         # Batch Size
         if batch_idx == FLAGS.epoch_steps - 1:
@@ -268,4 +269,13 @@ with tf.Session(config=config) as sess:
             start = time.time()
             print ("Epoch #%-5d | Test  Loss: %-4.3f | Calc_LossTime: %-3.3fs" %
                    (step / FLAGS.epoch_steps, epoch_loss, start - end))
+
+            print(weight2.eval())
+            print(weight1.eval())
+            print(bias1.eval())
+            #print(query_l2.eval())
+            
+            for i in range(FLAGS.pack_size):
+                query_y_v = sess.run(query_y, feed_dict=feed_dict(False, i))
+            print(query_y_v)
 
